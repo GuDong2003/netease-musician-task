@@ -6,7 +6,10 @@ FROM python:3.12-slim AS playwright-browser
 WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir \
+    --default-timeout=100 \
+    --retries=5 \
     --index-url https://mirrors.aliyun.com/pypi/simple/ \
+    --extra-index-url https://pypi.org/simple \
     --trusted-host mirrors.aliyun.com \
     -r requirements.txt
 ENV PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright/
@@ -30,7 +33,10 @@ RUN set -eux; \
 
 COPY requirements.txt ./
 RUN pip install --no-cache-dir \
+    --default-timeout=100 \
+    --retries=5 \
     --index-url https://mirrors.aliyun.com/pypi/simple/ \
+    --extra-index-url https://pypi.org/simple \
     --trusted-host mirrors.aliyun.com \
     -r requirements.txt
 
