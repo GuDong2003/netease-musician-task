@@ -19,7 +19,7 @@ from config import (
     WECOM_WEBHOOK_KEY,
 )
 
-import os
+import os, sys, random
 
 # 确保日志目录存在
 os.makedirs('log', exist_ok=True)
@@ -251,6 +251,10 @@ def retry_with_backoff(func, max_retries=3, delay=2, task_name="任务"):
 
 def daily_task_runner():
     """每日任务执行函数（日常签到、音乐人签到等）"""
+    if "--once" not in sys.argv:
+        sleeptime = random.randit(1, 30)
+        logger.info(f"随机等待 {sleeptime} 分钟后再运行")
+        time.sleep(sleeptime * 60)
     # 汇总给企业微信的精简结果（按用户聚合），避免推送完整日志
     daily_wecom_lines: list[str] = []
 
@@ -465,6 +469,10 @@ def daily_task_runner():
 
 def interval_task_runner():
     """间隔任务执行函数（音乐人发布动态任务）"""
+    if "--once" not in sys.argv:
+        sleeptime = random.randit(1, 30)
+        logger.info(f"随机等待 {sleeptime} 分钟后再运行")
+        time.sleep(sleeptime * 60)
     # 汇总给企业微信的精简结果（按用户聚合），避免推送完整日志
     interval_wecom_lines: list[str] = []
 
@@ -832,6 +840,11 @@ def interval_task_runner():
 
 def main():
     """主函数"""
+    if "--once" in sys.argv:
+        logger.info("检测到 --once 参数,将立即运行一次")
+        daily_task_runner()
+        interval_task_runner()
+        return
     logger.info("网易音乐人任务调度器启动")
     
     # 从配置文件导入的SEND_TIME已经验证过，直接使用
@@ -856,7 +869,8 @@ def main():
             trigger=CronTrigger(hour=hour, minute=minute, day_of_week='*'),
             id='netease_daily_task',
             name='网易云音乐每日任务',
-            replace_existing=True
+            replace_existing=True,
+            misfire_grace_time=30
         )
         
         # 添加间隔任务 - 每天在指定时间检查，但只在满足间隔天数时执行
@@ -865,7 +879,8 @@ def main():
             trigger=CronTrigger(hour=interval_hour, minute=interval_minute, day_of_week='*'),  # 间隔5分钟执行，避免冲突
             id='netease_interval_task',
             name='网易音乐人发布动态任务',
-            replace_existing=True
+            replace_existing=True,
+            misfire_grace_time=30
         )
         
         logger.info(f"每日任务已添加，每天 {SEND_TIME} 执行")
