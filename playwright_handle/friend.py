@@ -106,7 +106,7 @@ def _log_vip_task_progress(
 
     logger.info("打开音乐人权益页，监听 VIP 任务进度接口...")
     try:
-        with page.expect_response(_is_target, timeout=30000) as resp_info:
+        with page.expect_response(_is_target, timeout=60000) as resp_info:
             # 打开 y.music 的活动页，页面内部会自动请求目标接口
             page.goto(VIP_RIGHT_URL, wait_until="domcontentloaded")
         resp = resp_info.value

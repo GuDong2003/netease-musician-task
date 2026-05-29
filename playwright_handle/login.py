@@ -159,7 +159,7 @@ def _click_first(page: Page | Frame, locator_or_text: str, *, exact_text: bool =
                     loc = scope.locator(locator_or_text)
                 if loc.count() == 0:
                     continue
-                loc.first.wait_for(state="visible", timeout=500)
+                loc.first.wait_for(state="visible", timeout=5000)
                 loc.first.click()
                 return scope
             except Exception as e:
