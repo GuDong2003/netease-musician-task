@@ -112,6 +112,16 @@ def set_vip_further_get_time_ms(user_uid, ms: int) -> None:
         logger.error(f"保存用户 {user_uid} 的 VIP furtherVipGetTime 失败: {e}")
 
 
+def notify_configured(content: str, *, title: str | None = None, event: str = "notification", extra: dict | None = None) -> bool:
+    """发送通知到已配置的企业微信或自定义 Webhook。"""
+    try:
+        from wecom_notify import send_configured_notification
+
+        return send_configured_notification(content, title=title, event=event, extra=extra)
+    except Exception:
+        return False
+
+
 def _fmt_ms(ms: int) -> str:
     try:
         return datetime.fromtimestamp(int(ms) / 1000).strftime("%Y-%m-%d %H:%M:%S")
@@ -255,7 +265,7 @@ def daily_task_runner():
         sleeptime = random.randint(1, 30)
         logger.info(f"随机等待 {sleeptime} 分钟后再运行")
         time.sleep(sleeptime * 60)
-    # 汇总给企业微信的精简结果（按用户聚合），避免推送完整日志
+    # 汇总给通知渠道的精简结果（按用户聚合），避免推送完整日志
     daily_wecom_lines: list[str] = []
 
     # 为 Redis / 用户列表获取增加重试，避免短暂网络问题导致本次任务完全跳过
@@ -273,10 +283,10 @@ def daily_task_runner():
             logger.error(f"获取每日任务用户列表时发生异常: {e}")
             return None
 
-    # 运行日志收集与企业微信通知（仅本次运行有效）
+    # 运行日志收集与通知（仅本次运行有效）
     wecom_handler = None
     try:
-        from wecom_notify import LOGS, install_log_collector, send_wecom_webhook
+        from wecom_notify import LOGS, install_log_collector
         LOGS.clear()
         wecom_handler = install_log_collector(logger)
     except Exception:
@@ -295,20 +305,19 @@ def daily_task_runner():
         )
         if not load_res:
             logger.error("多次重试后仍无法从 Redis 获取每日任务用户列表，本次每日任务终止")
-            # Redis 多次重试仍失败时，发送简要企业微信通知
-            try:
-                if WECOM_WEBHOOK_KEY:
-                    from wecom_notify import send_wecom_webhook
-                    send_wecom_webhook(
-                        WECOM_WEBHOOK_KEY,
-                        "Redis连接失败，跳过执行",
-                        title="网易音乐人日常任务",
-                    )
-            except Exception:
-                pass
+            # Redis 多次重试仍失败时，发送简要通知。
+            notify_configured(
+                "Redis连接失败，跳过执行",
+                title="网易音乐人日常任务",
+                event="redis_error",
+            )
             return
 
         auth, user_list = load_res
+        try:
+            auth.notify_cookie_expiring(user_list)
+        except Exception as e:
+            logger.warning(f"Cookie 过期提醒检查失败: {e}")
         logger.info(f"发现 {len(user_list)} 个待处理用户")
         
         if not user_list:
@@ -422,7 +431,7 @@ def daily_task_runner():
                         except Exception as e:
                             logger.warning(f"更新用户 {user['uid']} Cookie失败: {e}")
 
-                    # 汇总给企业微信的精简结果
+                    # 汇总给通知渠道的精简结果
                     musician_summary = musician_checkin_res or {"message": "未获取到音乐人中心签到结果"}
                     daily_summary = daily_task_res or {"message": "未获取到日常签到任务结果"}
                     daily_wecom_lines.append(f"{user_label}：")
@@ -451,12 +460,10 @@ def daily_task_runner():
 
     # 仅在“正常跑完”后发送（不强制要求所有用户都成功，只要 runner 完成）
     try:
-        if WECOM_WEBHOOK_KEY:
-            from wecom_notify import send_wecom_webhook
-            # 使用汇总的关键信息，不发送完整日志
-            lines = [line for line in daily_wecom_lines if line is not None]
-            content = "\n".join(lines) if lines else "本次每日任务已执行，无用户结果可汇总。"
-            send_wecom_webhook(WECOM_WEBHOOK_KEY, content, title="网易音乐人日常任务")
+        # 使用汇总的关键信息，不发送完整日志。
+        lines = [line for line in daily_wecom_lines if line is not None]
+        content = "\n".join(lines) if lines else "本次每日任务已执行，无用户结果可汇总。"
+        notify_configured(content, title="网易音乐人日常任务", event="daily_task")
     except Exception:
         pass
     finally:
@@ -473,7 +480,7 @@ def interval_task_runner():
         sleeptime = random.randint(1, 30)
         logger.info(f"随机等待 {sleeptime} 分钟后再运行")
         time.sleep(sleeptime * 60)
-    # 汇总给企业微信的精简结果（按用户聚合），避免推送完整日志
+    # 汇总给通知渠道的精简结果（按用户聚合），避免推送完整日志
     interval_wecom_lines: list[str] = []
 
     # 为 Redis / 用户列表获取增加重试，避免短暂网络问题导致本次任务完全跳过
@@ -503,20 +510,19 @@ def interval_task_runner():
         )
         if not load_res:
             logger.error("多次重试后仍无法从 Redis 获取间隔任务用户列表，本次间隔任务终止")
-            # Redis 多次重试仍失败时，发送简要企业微信通知
-            try:
-                if WECOM_WEBHOOK_KEY:
-                    from wecom_notify import send_wecom_webhook
-                    send_wecom_webhook(
-                        WECOM_WEBHOOK_KEY,
-                        "Redis连接失败，跳过执行",
-                        title="网易音乐人发送任务",
-                    )
-            except Exception:
-                pass
+            # Redis 多次重试仍失败时，发送简要通知。
+            notify_configured(
+                "Redis连接失败，跳过执行",
+                title="网易音乐人发送任务",
+                event="redis_error",
+            )
             return
 
         auth, user_list = load_res
+        try:
+            auth.notify_cookie_expiring(user_list)
+        except Exception as e:
+            logger.warning(f"Cookie 过期提醒检查失败: {e}")
         logger.info(f"发现 {len(user_list)} 个待处理用户")
         
         if not user_list:
@@ -784,7 +790,7 @@ def interval_task_runner():
                                 logger.info(f'删除动态结果: {delete_res}')
                             else:
                                 logger.warning("删除动态失败：动态ID获取失败")
-                        # 汇总成功结果给企业微信
+                        # 汇总成功结果给通知渠道
                         interval_wecom_lines.append(f"{user_label}：")
                         vip_ms = get_vip_further_get_time_ms(user_uid)
                         if vip_ms:
@@ -827,13 +833,11 @@ def interval_task_runner():
     
     logger.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 间隔任务执行完毕")
 
-    # 执行完后发送精简版企业微信通知
+    # 执行完后发送精简版通知。
     try:
-        if WECOM_WEBHOOK_KEY:
-            from wecom_notify import send_wecom_webhook
-            lines = [line for line in interval_wecom_lines if line is not None]
-            content = "\n".join(lines) if lines else "本次发送任务已执行，无用户结果可汇总。"
-            send_wecom_webhook(WECOM_WEBHOOK_KEY, content, title="网易音乐人发送任务")
+        lines = [line for line in interval_wecom_lines if line is not None]
+        content = "\n".join(lines) if lines else "本次发送任务已执行，无用户结果可汇总。"
+        notify_configured(content, title="网易音乐人发送任务", event="interval_task")
     except Exception:
         pass
 

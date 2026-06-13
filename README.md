@@ -35,7 +35,7 @@ Docker 会自动拉取适合你系统架构的镜像版本。
 
 ## 最近更新 / 新功能概览
 
-- **企业微信 Webhook 通知**：任务执行结果可推送到企业微信，实现异常告警与结果提醒
+- **Webhook 通知**：支持自定义 Webhook，未配置时回退企业微信，实现异常告警与结果提醒
 - **VIP 自动领取**：支持自动领取音乐人永久 VIP（自动完成任务后）
 - **登录与分享增强**：
   - Playwright 网页端登录与分享，减少风控与安全验证异常
@@ -60,7 +60,7 @@ Docker 会自动拉取适合你系统架构的镜像版本。
 - ✅ **日志管理**：详细的日志记录，支持日志轮转和大小限制
 - ✅ **Docker 部署**：提供 Docker 镜像和 Compose 配置，便于部署
 - ✅ **VIP 自动领取**：自动完成 VIP 相关权益的领取操作
-- ✅ **企业微信通知**：通过企业微信 Webhook 推送任务执行结果和异常告警
+- ✅ **Webhook 通知**：优先通过自定义 Webhook 推送，未配置时使用企业微信
 - ✅ **任务失败重试机制**：任务失败时自动按策略重试，提高成功率
 - ✅ **Playwright 支持**：基于 Playwright 的网页登录、音乐人任务与分享，降低接口风控风险
 
@@ -139,6 +139,11 @@ HSET netease:music:task <task_key> '{"phone": "13800138000", "password": "your_p
 | `PLAYWRIGHT_PROFILE_BASEDIR` | Playwright 用户数据目录（持久化登录态） | `.playwright_profiles` |
 | `PLAYWRIGHT_PROFILE_PER_USER` | 是否按账号分子目录（建议 `1`，避免多账号串 Cookie） | `1` |
 | `WECOM_WEBHOOK_KEY` | 企业微信机器人 Webhook 的 `key`，留空则不推送 | 空 |
+| `CUSTOM_WEBHOOK_URL` | 自定义 Webhook 完整地址，填写后优先推送到这里，未填写才推送企业微信 | 空 |
+| `CUSTOM_WEBHOOK_METHOD` | 自定义 Webhook 请求方法 | `POST` |
+| `CUSTOM_WEBHOOK_HEADERS` | 自定义 Webhook 请求头，支持 JSON 对象或 `Header: value;Header2: value2` | 空 |
+| `COOKIE_EXPIRE_DAYS` | Cookie 写入 Redis 后的有效天数 | `7` |
+| `COOKIE_NOTIFY_BEFORE_DAYS` | Cookie 到期前多少天发送提醒 | `1` |
 
 示例：
 
@@ -149,6 +154,9 @@ export EXECUTION_INTERVAL_DAYS="7"
 export MAX_MONTHLY_SENDS="4"
 export LOGIN_METHOD="playwright"  # 推荐：API版基本上已无法使用 
 export WECOM_WEBHOOK_KEY="your-wecom-webhook-key"
+export CUSTOM_WEBHOOK_URL="https://example.com/webhook"
+export COOKIE_EXPIRE_DAYS="7"
+export COOKIE_NOTIFY_BEFORE_DAYS="1"
 ```
 
 ---
@@ -281,6 +289,9 @@ docker run -d --name netease-musician-task \
   -e LOGIN_METHOD="playwright" \    # 推荐：API版基本上已无法使用 
   -e PLAYWRIGHT_PROFILE_BASEDIR="playwright_profiles" \
   -e WECOM_WEBHOOK_KEY="your-wecom-webhook-key" \
+  -e CUSTOM_WEBHOOK_URL="https://example.com/webhook" \
+  -e COOKIE_EXPIRE_DAYS="7" \
+  -e COOKIE_NOTIFY_BEFORE_DAYS="1" \
   -v "$(pwd)/log:/app/log" \
   -v "$(pwd)/playwright_profiles:/app/playwright_profiles" \
   -v "$(pwd)/debug:/app/debug" \
@@ -353,6 +364,19 @@ MIT License
 ---
 
 ## 更新日志
+- v1.5.0
+  - 新增自定义 Webhook 通知，未配置时自动回退到企业微信通知
+  - 登录触发扫码验证时，自动推送二维码链接
+  - 新增 Cookie 过期提前提醒，支持配置有效期和提前提醒天数
+
+- v1.4.5
+  - 添加 `--once` 运行参数，方便部署后单独立即运行测试
+  - 每个任务执行前随机等待 1-30 分钟
+  - `scheduler.add_job` 添加超时执行参数 `misfire_grace_time=30`
+
+- v1.4.4
+  - 增加打开音乐人权益页的超时
+
 - v1.4.3
   - 添加Cookie自动更新功能(每次执行任务后，更新最新的Cookie) -> 测试功能
 

@@ -1,7 +1,21 @@
 import logging
+import json
 from datetime import datetime
 
 import requests
+
+try:
+    from config import (
+        CUSTOM_WEBHOOK_HEADERS,
+        CUSTOM_WEBHOOK_METHOD,
+        CUSTOM_WEBHOOK_URL,
+        WECOM_WEBHOOK_KEY,
+    )
+except Exception:
+    CUSTOM_WEBHOOK_HEADERS = ""
+    CUSTOM_WEBHOOK_METHOD = "POST"
+    CUSTOM_WEBHOOK_URL = ""
+    WECOM_WEBHOOK_KEY = ""
 
 
 # 运行日志收集（按你的参考实现的形状）
@@ -81,4 +95,90 @@ def send_wecom_webhook(webhook_key: str, content: str, *, title: str | None = No
         return isinstance(data, dict) and data.get("errcode", 0) == 0
     except Exception:
         return False
+
+
+def _parse_custom_headers(headers_text: str) -> dict[str, str]:
+    """解析自定义 Webhook 请求头配置。"""
+    if not headers_text:
+        return {}
+    try:
+        headers = json.loads(headers_text)
+        if isinstance(headers, dict):
+            return {str(k): str(v) for k, v in headers.items()}
+    except Exception:
+        pass
+
+    headers: dict[str, str] = {}
+    for item in headers_text.split(";"):
+        if ":" not in item:
+            continue
+        key, value = item.split(":", 1)
+        key = key.strip()
+        if key:
+            headers[key] = value.strip()
+    return headers
+
+
+def send_custom_webhook(
+    webhook_url: str,
+    content: str,
+    *,
+    title: str | None = None,
+    timeout: int = 10,
+    event: str = "notification",
+    extra: dict | None = None,
+) -> bool:
+    """向自定义 Webhook 推送通用 JSON 消息。"""
+    if not webhook_url:
+        return False
+
+    payload = {
+        "event": event,
+        "title": title or "网易音乐人任务",
+        "content": content or "",
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+    }
+    if extra:
+        payload["extra"] = extra
+
+    headers = _parse_custom_headers(CUSTOM_WEBHOOK_HEADERS)
+    headers.setdefault("Content-Type", "application/json")
+
+    try:
+        if CUSTOM_WEBHOOK_METHOD == "GET":
+            resp = requests.get(webhook_url, params=payload, headers=headers, timeout=timeout)
+        else:
+            resp = requests.request(
+                CUSTOM_WEBHOOK_METHOD or "POST",
+                webhook_url,
+                json=payload,
+                headers=headers,
+                timeout=timeout,
+            )
+        return 200 <= resp.status_code < 300
+    except Exception:
+        return False
+
+
+def send_configured_notification(
+    content: str,
+    *,
+    title: str | None = None,
+    timeout: int = 10,
+    event: str = "notification",
+    extra: dict | None = None,
+) -> bool:
+    """优先推送自定义 Webhook；未配置时再推送企业微信。"""
+    if CUSTOM_WEBHOOK_URL:
+        return send_custom_webhook(
+            CUSTOM_WEBHOOK_URL,
+            content,
+            title=title,
+            timeout=timeout,
+            event=event,
+            extra=extra,
+        )
+    if WECOM_WEBHOOK_KEY:
+        return send_wecom_webhook(WECOM_WEBHOOK_KEY, content, title=title, timeout=timeout)
+    return False
 

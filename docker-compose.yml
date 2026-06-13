@@ -25,6 +25,11 @@ services:
       - LOGIN_METHOD=playwright
       # 企业微信webhook密钥
       - WECOM_WEBHOOK_KEY=your-wecom-webhook-key
+      # 自定义 webhook 完整地址（可选）
+      - CUSTOM_WEBHOOK_URL=
+      # Cookie 有效天数与提前提醒天数
+      - COOKIE_EXPIRE_DAYS=7
+      - COOKIE_NOTIFY_BEFORE_DAYS=1
     logging:
       driver: "json-file"
       options:

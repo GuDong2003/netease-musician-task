@@ -58,9 +58,9 @@
 
 ### 5. 通知与可观测性
 
-- **企业微信 Webhook 通知**
-  - 支持配置 `WECOM_WEBHOOK_KEY`
-  - 将任务执行结果、异常信息推送到企业微信群
+- **Webhook 通知**
+  - 支持配置 `CUSTOM_WEBHOOK_URL`，未配置时回退 `WECOM_WEBHOOK_KEY`
+  - 将任务执行结果、异常信息推送到自定义 Webhook 或企业微信群
   - 适合部署在服务器上无人值守运行
   - 
 ![企业微信通知](./images/企业微信通知.png)

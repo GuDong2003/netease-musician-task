@@ -539,6 +539,17 @@ def check_secondary_verification(page: Page | Frame, timeout: int = 10, *, auto_
                                                 + urllib.parse.quote(qr_uri, safe="")
                                             )
                                             logger.warning(f"[二次验证] 扫码二维码链接：{qr_url}")
+                                            try:
+                                                from wecom_notify import send_configured_notification
+
+                                                send_configured_notification(
+                                                    f"账号 {debug_phone} 触发登录扫码验证，请尽快扫码：\n{qr_url}",
+                                                    title="网易音乐人登录扫码验证",
+                                                    event="login_qr",
+                                                    extra={"phone": debug_phone, "qr_url": qr_url},
+                                                )
+                                            except Exception as e:
+                                                logger.warning(f"[二次验证] 扫码二维码通知发送失败：{e}")
                                             # 标记：已进入扫码验证流程，后续应至少等待一段时间给用户扫码
                                             try:
                                                 setattr(pw_page, "_secondary_scan_started_at", time.time())

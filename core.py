@@ -7,6 +7,7 @@ from logging.handlers import RotatingFileHandler
 import random
 import time
 import urllib.parse
+from datetime import datetime
 
 import redis
 import requests
@@ -45,7 +46,15 @@ if not logger.handlers:
     logger.addHandler(stream_handler)
 
 # 从配置文件导入Redis配置
-from config import REDIS_POOL, REDIS_CONF, LOGIN_METHOD, PLAYWRIGHT_PROFILE_BASEDIR, PLAYWRIGHT_PROFILE_PER_USER
+from config import (
+    COOKIE_EXPIRE_DAYS,
+    COOKIE_NOTIFY_BEFORE_DAYS,
+    LOGIN_METHOD,
+    PLAYWRIGHT_PROFILE_BASEDIR,
+    PLAYWRIGHT_PROFILE_PER_USER,
+    REDIS_CONF,
+    REDIS_POOL,
+)
 
 
 # --- 1. 基础加解密工具类 ---
@@ -251,6 +260,9 @@ class NeteaseClient:
 
 # --- 4. 账号与登录管理类 ---
 class AuthManager:
+    COOKIE_META_KEY_TPL = 'netease:music:user:{uid}:cookie:meta'
+    COOKIE_NOTIFY_KEY_TPL = 'netease:music:user:{uid}:cookie:expire_notify:{date}'
+
     def __init__(self):
         try:
             self.redis = redis.Redis(connection_pool=REDIS_POOL) if REDIS_POOL else None
@@ -261,6 +273,78 @@ class AuthManager:
         except Exception as e:
             logger.error(f"初始化Redis连接失败: {e}")
             self.redis = None
+
+    def _cookie_ttl_seconds(self) -> int:
+        """返回 Cookie 写入 Redis 时使用的过期秒数。"""
+        return max(1, int(COOKIE_EXPIRE_DAYS)) * 86400
+
+    def _write_cookie_with_meta(self, uid, cookie_str, user_data=None):
+        """写入 Cookie，并同步记录保存时间和预计过期时间。"""
+        ttl = self._cookie_ttl_seconds()
+        now_ts = int(time.time())
+        pipe = self.redis.pipeline()
+        pipe.set(f'netease:music:user:{uid}:cookie', cookie_str, ex=ttl)
+        pipe.set(
+            self.COOKIE_META_KEY_TPL.format(uid=uid),
+            json.dumps({"saved_at": now_ts, "expires_at": now_ts + ttl}),
+            ex=ttl,
+        )
+        if user_data is not None:
+            pipe.set(f'netease:music:user:{uid}:userdata', json.dumps(user_data), ex=ttl)
+        pipe.execute()
+
+    def notify_cookie_expiring(self, user_list=None) -> int:
+        """检查 Cookie 是否即将过期，并按用户每天最多提醒一次。"""
+        if not self.redis:
+            return 0
+        if user_list is None:
+            user_list = self.get_all_users_credentials()
+
+        now_ts = int(time.time())
+        threshold = max(0, int(COOKIE_NOTIFY_BEFORE_DAYS)) * 86400
+        notified = 0
+        for user in user_list or []:
+            uid = user.get('uid')
+            if not uid:
+                continue
+            try:
+                ttl = self.redis.ttl(f'netease:music:user:{uid}:cookie')
+                if ttl is None or ttl < 0 or ttl > threshold:
+                    continue
+
+                notify_date = datetime.fromtimestamp(now_ts).strftime("%Y%m%d")
+                notify_key = self.COOKIE_NOTIFY_KEY_TPL.format(uid=uid, date=notify_date)
+                if not self.redis.set(notify_key, "1", nx=True, ex=86400 * 2):
+                    continue
+
+                meta = {}
+                meta_raw = self.redis.get(self.COOKIE_META_KEY_TPL.format(uid=uid))
+                if meta_raw:
+                    try:
+                        meta = json.loads(meta_raw)
+                    except Exception:
+                        meta = {}
+                expires_at = int(meta.get("expires_at") or (now_ts + ttl))
+                expires_text = datetime.fromtimestamp(expires_at).strftime("%Y-%m-%d %H:%M:%S")
+                content = (
+                    f"用户 {uid} 的 Cookie 将在 {expires_text} 过期，"
+                    f"剩余约 {max(0, ttl // 3600)} 小时。"
+                )
+                try:
+                    from wecom_notify import send_configured_notification
+
+                    send_configured_notification(
+                        content,
+                        title="网易音乐人 Cookie 即将过期",
+                        event="cookie_expiring",
+                        extra={"uid": uid, "ttl_seconds": ttl, "expires_at": expires_at},
+                    )
+                    notified += 1
+                except Exception as e:
+                    logger.warning(f"用户 {uid} Cookie 过期提醒发送失败: {e}")
+            except Exception as e:
+                logger.warning(f"检查用户 {uid} Cookie 过期时间失败: {e}")
+        return notified
 
     def _get_uid_by_cookie(self, cookie_str: str):
         """
@@ -459,8 +543,7 @@ class AuthManager:
 
         try:
             # Key 改回简单的 :cookie，存纯字符串
-            self.redis.set(f'netease:music:user:{uid}:cookie', cookie_str, ex=86400 * 30)  # 30天过期
-            self.redis.set(f'netease:music:user:{uid}:userdata', json.dumps(user_data), ex=86400 * 30)
+            self._write_cookie_with_meta(uid, cookie_str, user_data)
             return True
         except Exception as e:
             logger.error(f"保存用户 {uid} 会话失败: {e}")
@@ -471,7 +554,7 @@ class AuthManager:
         if not self.redis or not cookie_str:
             return False
         try:
-            self.redis.set(f'netease:music:user:{uid}:cookie', cookie_str, ex=86400 * 30)
+            self._write_cookie_with_meta(uid, cookie_str)
             logger.info(f"已更新用户 {uid} 的Cookie到Redis")
             return True
         except Exception as e:
